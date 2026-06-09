@@ -23,3 +23,44 @@ Results
 - Power BI refreshes semantic model
 - Python visuals regenerate automatically
 </p>
+
+<p>
+Plan:
+
+powerbi-portfolio-project/
+
+├── docker-compose.yml
+
+├── airflow/
+│   ├── dags/
+│   │   ├── csv_loader.py
+│   │   └── api_loader.py
+│   │
+│   └── requirements.txt
+
+├── etl/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── scripts/
+
+├── database/
+│   ├── postgres/
+│   │   └── init.sql
+│   │
+│   └── mysql/
+│       └── init.sql
+
+├── powerbi/
+│   ├── dashboard.pbix
+│   ├── screenshots/
+│   └── data_model.png
+
+├── data/
+│   └── source_csv/
+
+├── docs/
+│   ├── architecture.png
+│   └── setup.md
+
+└── README.md
+</p>
