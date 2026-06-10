@@ -1,0 +1,12 @@
+Matplotlib
+plot:
+'o' - dot
+'–' - line
+'--' - dashed line
+'r-' - red line chart
+bar:
+*no 3rd parameter
+
+Seaborn
+violinplot(x=dataset["continent"],y=dataset["wine_servings"],palette="Blues")
+pairplot(dataset)
