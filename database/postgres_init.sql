@@ -1,10 +1,10 @@
 
-create schema staging;
+create schema if not exists staging;
 
-create table staging.drinks
+create table if not exists staging.drinks
 (
 id int generated always as identity primary key,
-coutry varchar(60) not null,
+country varchar(60) not null,
 beer int,
 spirit int,
 wine int,
@@ -12,16 +12,16 @@ total_litres decimal(10,2),
 continent char(2)
 );
 
-create table staging.expectancy
+create table if not exists staging.expectancy
 (
 id int generated always as identity primary key,
-coutry varchar(60) not null,
+country varchar(60) not null,
 both_g decimal(10,2),
 female decimal(10,2),
 male decimal(10,2)
 );
 
-create table staging.worldcities 
+create table if not exists staging.worldcities 
 (
 id int generated always as identity primary key,
 city varchar(60),
@@ -36,16 +36,16 @@ capital varchar(10),
 population int
 );
 
-create table staging.vehicles_country
+create table if not exists staging.vehicles_country
 (
 id int generated always as identity primary key,
-coutry varchar(60) not null,
+country varchar(60) not null,
 per1kpeople int,
 total int,
 year int
 );
 
-create table staging.happiness
+create table if not exists staging.happiness
 (
 id int generated always as identity primary key,
 country varchar(60),
