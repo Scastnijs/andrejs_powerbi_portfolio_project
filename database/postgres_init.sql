@@ -50,7 +50,7 @@ create table if not exists staging.happiness
 id int generated always as identity primary key,
 year int,
 country varchar(60),
-region varchar(30),
+region varchar(60),
 rank int,
 score decimal(10,5),
 gdp_per_capita decimal(7,5),
