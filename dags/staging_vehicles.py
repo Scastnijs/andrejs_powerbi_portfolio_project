@@ -6,7 +6,7 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
 with DAG(
-    dag_id="staging_worldcities",
+    dag_id="staging_vehicles",
     start_date=datetime(2025, 1, 1),
     schedule=None,
     catchup=False,
@@ -16,7 +16,7 @@ with DAG(
     def read_csv():
         import csv
 
-        csv_file = "/opt/airflow/data/source_csv/worldcities.csv"
+        csv_file = "/opt/airflow/data/source_csv/vehicles_country.csv"
 
         rows = []
 
@@ -26,16 +26,10 @@ with DAG(
             for row in reader:
                 rows.append(
                     (
-                        row["city"],
-                        row["city_ascii"],
-                        float(row["lat"]),
-                        float(row["lng"]),
                         row["country"],
-                        row["iso2"],
-                        row["iso3"],
-                        row["admin_name"],
-                        row["capital"],
-                        int(-1 if row["population"] == "" else row["population"])
+                        int(row["per1000people"]),
+                        int(row["total"]),
+                        int(row["year"])
                     )
                 )
 
@@ -46,9 +40,9 @@ with DAG(
         hook = PostgresHook(postgres_conn_id="postgres")
 
         insert_sql = """
-        INSERT INTO staging.worldcities
-        (city, city_ascii, lat, lng, country, iso2, iso3, admin_name, capital, population)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO staging.vehicles_country
+        (country, per1kpeople, total, year)
+        VALUES (%s, %s, %s, %s)
         """
 
         conn = hook.get_conn()
