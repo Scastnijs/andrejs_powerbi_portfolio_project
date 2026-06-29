@@ -1,4 +1,4 @@
-#country_code_alpha2,subdivision_code_iso3166-2,subdivision_name,language_code,parent_subdivision,category,localVariant
+country_code_alpha2,subdivision_code_iso3166-2,subdivision_name,language_code,parent_subdivision,category,localVariant
 AD,AD-07,Andorra la Vella,ca,,PARISH,
 AD,AD-02,Canillo,ca,,PARISH,
 AD,AD-03,Encamp,ca,,PARISH,

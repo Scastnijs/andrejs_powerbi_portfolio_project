@@ -67,3 +67,26 @@ CREATE TABLE staging.country_alias
     alias_country varchar(100) PRIMARY KEY,
     canonical_country varchar(60) NOT NULL
 );
+
+create table if not exists staging.countries
+(
+	id int generated always as identity primary key,
+	iso2 char(2),
+	iso3 char(3),
+	numeric_code int,
+	name_short varchar(60),
+	name_long varchar(60)
+);
+
+create table if not exists staging.subdivisions
+(
+	id int generated always as identity primary key,
+	iso2 char(2),
+	subdivision_code varchar(6),
+	name varchar(60),
+	language_code char(2),
+	parent_subdivision varchar(60),
+	category varchar(60),
+	local_variant varchar(60)
+);
+
