@@ -22,10 +22,14 @@ default_args = {
 
 def task1(**context):
     hook = PostgresHook(postgres_conn_id="postgres")
+    table = context["params"]["table"]
 
-    drinks = hook.get_records("""
+    if table not in TABLES:
+        raise ValueError(f"Unsupported source table: {table}")
+
+    drinks = hook.get_records(f"""
         SELECT distinct country
-        FROM staging.drinks
+        FROM {table}
     """)
 
     aliases = hook.get_records("""
