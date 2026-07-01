@@ -5,6 +5,7 @@ from airflow.sdk import DAG, Param, task
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.mysql.hooks.mysql import MySqlHook
+from airflow.providers.standard.operators.python import PythonOperator
 
 # --- Configuration ---
 TABLES = [
@@ -160,23 +161,29 @@ def task1_discovery_and_map(**context):
 def task2(**context):
     """
     Phase 3: Load the clean, canonical data into the target dimensional model (dw.dim_geo).
+    This function must now provide values for all non-nullable columns in dw.dim_geo.
     """
     # The records here are already cleaned and canonicalized by task1
     records = context["ti"].xcom_pull(task_ids="task1", key="country_data")
 
     hook = MySqlHook(mysql_conn_id="mysql")
 
+    # UPDATED SQL: Providing placeholders for all non-nullable columns (geo_code, geo_type, etc.)
     insert_sql = """
         INSERT INTO dw.dim_geo 
-            (geo_name) 
+            (geo_code, geo_name, geo_type) 
             VALUES 
-            (%s)
+            (%s, %s, 'COUNTRY') -- Placeholder: code, name, type
             ON DUPLICATE KEY UPDATE
-            geo_name = VALUES(geo_name);
+            geo_name = VALUES(geo_name),
+            geo_code = VALUES(geo_code);
     """
 
     for row in records:
-        hook.run(insert_sql, parameters=(row,))
+        # We now unpack the canonical country name (row[0]) into multiple parameters.
+        # For this POC, we treat the canonical name as both the code and the initial value.
+        canonical_name = row[0]
+        hook.run(insert_sql, parameters=(canonical_name, canonical_name, 'COUNTRY'))
 
 # DAG Definition remains the same but now calls the refactored task1/task2
 with DAG(
