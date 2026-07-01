@@ -20,7 +20,7 @@ MODEL_NAME = "gemma4" # Or whatever model you prefer
 
 default_args = {
     'owner': 'andrejs',
-    'retries': 5,
+    'retries': 2,
     'retry_delay': timedelta(minutes=1)
 }
 
@@ -161,29 +161,33 @@ def task1_discovery_and_map(**context):
 def task2(**context):
     """
     Phase 3: Load the clean, canonical data into the target dimensional model (dw.dim_geo).
-    This function must now provide values for all non-nullable columns in dw.dim_geo.
+    Must provide values for all non-nullable columns (geo_code, geo_name, geo_type).
+    This version ensures all values are parameterized to avoid ProgrammingError.
     """
     # The records here are already cleaned and canonicalized by task1
     records = context["ti"].xcom_pull(task_ids="task1", key="country_data")
 
     hook = MySqlHook(mysql_conn_id="mysql")
 
-    # UPDATED SQL: Providing placeholders for all non-nullable columns (geo_code, geo_type, etc.)
+    # UPDATED SQL: Now all non-nullable values, including 'geo_type', are parameterized.
     insert_sql = """
         INSERT INTO dw.dim_geo 
             (geo_code, geo_name, geo_type) 
             VALUES 
-            (%s, %s, 'COUNTRY') -- Placeholder: code, name, type
+            (%s, %s, %s) -- Three placeholders for the three values: code, name, type
             ON DUPLICATE KEY UPDATE
             geo_name = VALUES(geo_name),
             geo_code = VALUES(geo_code);
     """
 
     for row in records:
-        # We now unpack the canonical country name (row[0]) into multiple parameters.
-        # For this POC, we treat the canonical name as both the code and the initial value.
         canonical_name = row[0]
+        # We pass three parameters for the insert: 
+        # 1. canonical_name (as geo_code)
+        # 2. canonical_name (as geo_name)
+        # 3. 'COUNTRY' (as geo_type - we must quote this string when passing it)
         hook.run(insert_sql, parameters=(canonical_name, canonical_name, 'COUNTRY'))
+
 
 # DAG Definition remains the same but now calls the refactored task1/task2
 with DAG(
