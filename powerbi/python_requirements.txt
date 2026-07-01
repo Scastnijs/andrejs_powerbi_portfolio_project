@@ -4,3 +4,4 @@ cartopy
 seaborn
 matplotlib
 folium
+ollama
