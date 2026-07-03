@@ -1,17 +1,16 @@
-from airflow.decorators import dag, task
-from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime
-import requests
 import json
 
-@dag(
-    start_date=datetime(2025, 1, 1),
-    schedule=None,
-    catchup=False
-)
-def ollama_test():
+from airflow import DAG
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.providers.http.hooks.http import HttpHook
 
-    url = "http://localhost:11434/api/chat"
+
+def chat_with_ollama():
+    hook = HttpHook(
+        method="POST",
+        http_conn_id="Ollama"
+    )
 
     payload = {
         "model": "gemma4",
@@ -23,21 +22,49 @@ def ollama_test():
         ]
     }
 
-    response = requests.post(url, json=payload, stream=True)
+    response = hook.run(
+        endpoint="/api/chat",
+        json=payload,
+        extra_options={"stream": True}
+    )
 
-    if response.status_code == 200:
-        print("Streaming response:")
-        for line in response.iter_lines(decode_unicode=True):
-            if line:
-                try:
-                    json_data = json.loads(line)
-                    if "message" in json_data and "content" in json_data["message"]:
-                        print(json_data["message"]["content"], end='', flush=True)
-                except json.JSONDecodeError:
-                    print(f"Failed to decode JSON: {line}")
-        print()
-    else:
-        print(f"Request failed with status code: {response.status_code}")
-        print(response.text)
+    if response.status_code != 200:
+        raise Exception(
+            f"Request failed: {response.status_code}\n{response.text}"
+        )
 
-dag = ollama_test()
+    print("Streaming response:")
+
+    for line in response.iter_lines(decode_unicode=True):
+        if line:
+            try:
+                json_data = json.loads(line)
+
+                if (
+                    "message" in json_data
+                    and "content" in json_data["message"]
+                ):
+                    print(
+                        json_data["message"]["content"],
+                        end="",
+                        flush=True
+                    )
+
+            except json.JSONDecodeError:
+                print(f"Failed to decode JSON: {line}")
+
+    print()
+
+
+with DAG(
+    dag_id="ollama_test",
+    start_date=datetime(2025, 1, 1),
+    schedule=None,
+    catchup=False,
+    tags=["http", "ollama"],
+) as dag:
+
+    ollama_task = PythonOperator(
+        task_id="chat_with_ollama",
+        python_callable=chat_with_ollama,
+    )
