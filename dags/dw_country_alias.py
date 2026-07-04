@@ -28,7 +28,7 @@ default_args = {
 
 # --- The AI Service Wrapper Function ---
 
-def get_canonical_country(alias: str, hook: PostgresHook, model_name: str) -> tuple[str | None, bool]:
+def get_canonical_country(alias: str, hook: PostgresHook, model_name: str, canonical_country_list: list[str]) -> tuple[str | None, bool]:
     """
     Uses the Ollama API via HttpHook to map a raw country alias. 
     Returns (canonical_name, is_newly_discovered).
@@ -61,15 +61,6 @@ def get_canonical_country(alias: str, hook: PostgresHook, model_name: str) -> tu
         print(f"--- [FATAL] Could not initialize HttpHook. Check Airflow Connection ID '{OLLAMA_CONN_ID}'. Error: {e} ---")
         return None, False
 
-    # Load canonical country list from DB
-    conn1 = hook.get_conn()
-    try:
-        with conn1.cursor() as cur:
-            cur.execute("SELECT name_short FROM staging.countries ORDER BY name_short;")
-            canonical_country_list = [row[0] for row in cur.fetchall()]
-    finally:
-        conn1.close()
-
     system_prompt = f"""
 
         You are an expert data pipeline validator.
@@ -86,13 +77,20 @@ def get_canonical_country(alias: str, hook: PostgresHook, model_name: str) -> tu
         1. Return canonical_name using EXACTLY one value from the list above.
         2. If the alias already equals one of the canonical values, return it unchanged.
         3. If the alias is a different spelling, abbreviation, translation, historical name, or alternative name, map it to the corresponding canonical value from the list.
-        4. Analyze whether the alias should be registered as a NEW alias. Return false if alias is equal to canonical value.
+        4. Analyze whether the alias should be registered as a NEW alias. Return false ONLY if alias is equal to canonical value, otherwise return true.
 
         Example:
         Input: "Czech Republic"
 
-        Output:
-        {{"canonical_name":"Czechia","is_newly_discovered":true,"reasoning":"The alias "Czech Republic" maps to the canonical value "Czechia" and alias is not equeal to canonical value, so it is a new discovery."}}
+        Example mapping:
+            Alias:
+            "Czech Republic"
+
+            Canonical value:
+            "Czechia"
+
+            Reason:
+            "Czech Republic" is an alternative name that maps to the canonical value "Czechia".
 
         Return ONLY one JSON object with the keys:
         - canonical_name
@@ -154,48 +152,72 @@ def task1_discovery_and_map(**context):
     Pushes the cleaned data to XCom for transformation by task2.
     """
     hook = PostgresHook(postgres_conn_id="postgres")
-    model_name = context['params']['llm_model'] 
+    model_name = context["params"]["llm_model"]
+    table = context["params"]["source_table"]
 
-    # Use a single transactional block for discovery and commit phase
+    # One connection for the task's transactional writes.
+    # Cursors are opened only when needed and never reused after their "with" block.
     with hook.get_conn() as conn:
         with conn.cursor() as cur:
-            # 1. Find all unique raw country aliases from the primary source table
-            table = context["params"]["source_table"]
+            # Load the canonical values once for this DAG run.
+            cur.execute("""
+                SELECT name_short
+                FROM staging.countries
+                ORDER BY name_short;
+            """)
+            canonical_country_list = [row[0] for row in cur.fetchall()]
+
+            # Find all unique raw country aliases from the selected source table.
             cur.execute(f"""
-                SELECT DISTINCT country FROM {table};
+                SELECT DISTINCT country
+                FROM {table}
+                WHERE country IS NOT NULL;
             """)
             raw_aliases = [row[0] for row in cur.fetchall()]
 
-        # 2. Discovery and Validation Loop
-        newly_discovered_alias_list = [] # (alias, canonical)
+        newly_discovered_alias_list = []  # (alias, canonical)
         transformed_records = []
         all_logs = []
 
         for alias in raw_aliases:
-            canonical, is_new = get_canonical_country(alias, hook, model_name)
-            
+            canonical, is_new = get_canonical_country(
+                alias=alias,
+                hook=hook,
+                model_name=model_name,
+                canonical_country_list=canonical_country_list,
+            )
+
             if canonical is None:
-                continue 
-            
-            log_entry = f"Alias '{alias}' mapped to '{canonical}'. New discovery status: {is_new}."
+                continue
+
+            log_entry = (
+                f"Alias '{alias}' mapped to '{canonical}'. "
+                f"New discovery status: {is_new}."
+            )
             all_logs.append(log_entry)
 
-            # A. Handle Novel Discoveries (The database transactional commit step)
-            if is_new and canonical not in [l[0] for l in newly_discovered_alias_list]: 
+            # Register a newly discovered alias.
+            # IMPORTANT:
+            # Do not use the old cursor here. The cursor used above was closed
+            # when its "with conn.cursor() as cur" block ended.
+            if is_new and alias not in [item[0] for item in newly_discovered_alias_list]:
                 print(f"NEW DISCOVERY FOUND: '{alias}' -> '{canonical}'. Preparing to register.")
-                cur.execute("""
-                    INSERT INTO staging.country_alias (alias_country, canonical_country) 
-                    VALUES (%s, %s) ON CONFLICT (alias_country) DO NOTHING;
-                """, (alias, canonical))
-                newly_discovered_alias_list.append((alias, canonical)) # Track locally for reporting
 
-            # B. Build the final data record
+                with conn.cursor() as insert_cur:
+                    insert_cur.execute("""
+                        INSERT INTO staging.country_alias
+                            (alias_country, canonical_country)
+                        VALUES
+                            (%s, %s)
+                        ON CONFLICT (alias_country) DO UPDATE
+                        SET canonical_country = EXCLUDED.canonical_country;
+                    """, (alias, canonical))
+
+                newly_discovered_alias_list.append((alias, canonical))
+
             transformed_records.append(canonical)
 
-          # 3. Final Data Transformation Push (XCom payload)
         context["ti"].xcom_push("country_data", transformed_records)
-        
-        # 4. Log Results to XCom for DAG reporting/monitoring
         context["ti"].xcom_push("discovery_logs", "\n".join(all_logs))
 
     return transformed_records
