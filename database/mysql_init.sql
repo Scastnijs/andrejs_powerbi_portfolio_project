@@ -5,7 +5,7 @@ SET autocommit = 1;
 create table dw.dim_geo
 (
 	geo_key int auto_increment primary key,
-	geo_code varchar(20) not null unique,
+	geo_code varchar(3) not null unique,
     geo_name varchar(100) not null,
     geo_type varchar(30) not null,
 	iso2 char(2),

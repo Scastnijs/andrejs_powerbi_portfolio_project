@@ -61,12 +61,44 @@ def get_canonical_country(alias: str, hook: PostgresHook, model_name: str) -> tu
         print(f"--- [FATAL] Could not initialize HttpHook. Check Airflow Connection ID '{OLLAMA_CONN_ID}'. Error: {e} ---")
         return None, False
 
-    system_prompt = f"""You are an expert data pipeline validator. Your task is to take a raw country alias, which might be grammatically incorrect or informal. 
-    1. Determine the single, correct canonical country name (ISO 3166 standard form).
-    2. Analyze if this alias is genuinely new and hasn't been seen before in staging data/common knowledge (assume no other context). If it must be registered as a NEW alias, return true for novelty. Otherwise, return false.
+    # Load canonical country list from DB
+    conn1 = hook.get_conn()
+    try:
+        with conn1.cursor() as cur:
+            cur.execute("SELECT name_short FROM staging.countries ORDER BY name_short;")
+            canonical_country_list = [row[0] for row in cur.fetchall()]
+    finally:
+        conn1.close()
 
-    Your response MUST be a single JSON object with exactly three keys: "canonical_name", "is_newly_discovered" (boolean), and "reasoning".
-    Example of success response: {{"canonical_name": "Canada", "is_newly_discovered": true, "reasoning": "Found 'Kanada', mapping to 'Canada' which needs registration."}}"""
+    system_prompt = f"""
+
+        You are an expert data pipeline validator.
+        Your task is to normalize country names for a data warehouse.
+        The ONLY valid canonical country names are the values from
+        data/source_csv/countries.csv (column: name_short).
+        Do NOT use ISO 3166 names or your own preferred country names.
+        Choose exactly one of the following canonical values:
+
+        {canonical_country_list}
+
+        Rules:
+
+        1. Return canonical_name using EXACTLY one value from the list above.
+        2. If the alias already equals one of the canonical values, return it unchanged.
+        3. If the alias is a different spelling, abbreviation, translation, historical name, or alternative name, map it to the corresponding canonical value from the list.
+        4. Analyze whether the alias should be registered as a NEW alias. Return false if alias is equal to canonical value.
+
+        Example:
+        Input: "Czech Republic"
+
+        Output:
+        {{"canonical_name":"Czechia","is_newly_discovered":true,"reasoning":"The alias "Czech Republic" maps to the canonical value "Czechia" and alias is not equeal to canonical value, so it is a new discovery."}}
+
+        Return ONLY one JSON object with the keys:
+        - canonical_name
+        - is_newly_discovered
+        - reasoning
+        """
 
     payload = json.dumps({
         "model": model_name,
