@@ -73,24 +73,31 @@ def get_canonical_country(alias: str, hook: PostgresHook, model_name: str) -> tu
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Validate and map the alias: '{alias}'"}
-        ]
+        ],
+        "stream": False
     })
 
     try:
-        # Run the HTTP call using HttpHook. 
+       # Run the HTTP call using HttpHook. 
         resp = http_hook.run(
-            endpoint='chat',
+            endpoint='/api/chat',
             extra_options={"headers": {"Content-Type": "application/json"}},
             data=payload,
             headers={"Accept": "application/json"}
         )
 
-        # Safety check for the expected response structure from chat endpoints
-        if 'response' in resp and isinstance(resp['response'], str):
-             content = json.loads(resp['response']).get("message", {}).get("content", "")
-        else:
-            raise ValueError("Could not find message content in HTTP response.")
+        print(resp.status_code)
+        print(resp.text)
 
+        response_json = resp.json()
+        content = response_json.get("message", {}).get("content", "")
+
+        content = (
+            content
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+        )
 
         match = json.loads(content.strip()) 
 
@@ -183,10 +190,11 @@ def task2(**context):
             geo_code = VALUES(geo_code);
     """
 
-    for row in records:
-        canonical_name = row[0]
-        # Pass parameters for (geo_code, geo_name, geo_type) - 'COUNTRY' is hardcoded as the type
-        hook.run(insert_sql, parameters=(canonical_name, canonical_name, 'COUNTRY'))
+    for canonical_name in records:
+        hook.run(
+            insert_sql,
+            parameters=(canonical_name, canonical_name, "COUNTRY")
+        )
 
 # DAG Definition 
 with DAG(
