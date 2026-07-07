@@ -68,8 +68,10 @@ def task2(**context):
     processed_count = 0
     failed_rows = []
 
-    print("--- Starting data insertion process ---")
-
+    print("\n===============================================================")
+    print("!!! DIAGNOSTIC OUTPUT: Generated SQL Statements to be run manually !!!")
+    print("=============================================================\n")
+    
     with hook.get_conn() as conn:
         with conn.cursor() as cur:
             for i, row in enumerate(records):
@@ -78,7 +80,7 @@ def task2(**context):
                     value = row[1] if row[1] else None
                     indicator = row[2]
 
-                    # --- Dimension Lookups ---
+                    # --- Dimension Lookups (Same dimension lookups) ---
                     cur.execute("""
                         SELECT geo_key FROM dw.dim_geo WHERE geo_name = %s;
                     """, (country,))
@@ -107,8 +109,9 @@ def task2(**context):
                     if not result: raise ValueError("Could not find time key for current date")
                     dim_time_keys = [result[0]]
 
-                    # --- UPSERT Insertion ---
-                    insert_sql = """
+                    # --- Construct SQL Statement and Log it out ---
+                    
+                    insert_sql_template = """
                         INSERT INTO dw.fact_observation_country
                             (geo_key, indicator_key, time_key, unit_key, value, loaded_at) 
                             VALUES (%s, %s, %s, %s, %s, current_timestamp)
@@ -117,12 +120,31 @@ def task2(**context):
                             loaded_at = VALUES(loaded_at);
                     """
 
-                    cur.execute(insert_sql, (
+                    # Manually format the executed values for logging readability.
+                    # Keep insert_sql_template parameterized for safe execution,
+                    # but log one complete SQL statement that can be copied and run manually.
+                    logged_value = "NULL" if value is None else str(value)
+
+                    log_sql = f"""
+                    -- Log entry for Record {i + 1} (Country: {country}, Indicator: {indicator}) --
+                    INSERT INTO dw.fact_observation_country
+                        (geo_key, indicator_key, time_key, unit_key, value, loaded_at)
+                    VALUES ({dim_geo_keys[0]}, {dim_indicator_keys[0]}, {dim_time_keys[0]}, {dim_unit_keys[0]}, {logged_value}, current_timestamp)
+                    ON DUPLICATE KEY UPDATE
+                        value = VALUES(value),
+                        loaded_at = VALUES(loaded_at);
+                    -- End log entry --
+                    """
+                    # Print the fully formatted SQL to the console for the user
+                    print("\n" + log_sql.strip())
+
+                    # --- Execution (Keep this part running) ---
+                    cur.execute(insert_sql_template, (
                         dim_geo_keys[0],
                         dim_indicator_keys[0],
                         dim_time_keys[0],
                         dim_unit_keys[0],
-                        value, 
+                        value if value is not None else None, # Passing None/NULL for SQL
                     ))
                     processed_count += 1
 
@@ -132,12 +154,13 @@ def task2(**context):
 
 
     if failed_rows:
-        print("\n*** DATA INSERTION SUMMARY ***")
-        print(f"SUCCESSFULLY PROCESSED ROWS: {processed_count} out of {len(records)}")
+        print("\n\n*** DATA INSERTION SUMMARY ***")
+        print(f"SUCCESSFULLY PROCESSED ROWS (and logged SQL): {processed_count} out of {len(records)}")
         print(f"FAILED TO PROCESS (SKIPPED/ERROR) ROWS: {len(failed_rows)}.")
     else:
-        print("\n*** DATA INSERTION SUMMARY ***")
-        print(f"SUCCESSFULLY PROCESSED ALL {processed_count} ROWS into dw.fact_observation_country.")
+        print("\n\n*** DATA INSERTION SUMMARY ***")
+        print(f"SUCCESSFULLY PROCESSED ALL {processed_count} ROWS into dw.fact_observation_country and logged all necessary SQL statements.")
+
 
 
 def task3(**context):
