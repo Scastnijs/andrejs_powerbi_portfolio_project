@@ -99,7 +99,7 @@ def task2(**context):
 
                     # Get dw.dim_time key for current date
                     cur.execute("""
-                        SELECT time_key FROM dw.dim_time WHERE indicator_name = year(CURRENT_DATE());
+                        SELECT time_key FROM dw.dim_time WHERE year = year(CURRENT_DATE());
                     """)
                     dim_time_keys = [row[0] for row in cur.fetchall()]
 
@@ -129,7 +129,6 @@ def task2(**context):
                 except Exception as e:
                     # Handle cases where key lookups fail (e.g., data mismatch)
                     print(f"Failed to process row ({country}, {value}, {indicator}): {e}")
-
 with DAG(
     dag_id='dw_f_country_drinks',
     default_args=default_args,
