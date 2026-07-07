@@ -56,7 +56,6 @@ def task1(**context):
         value=records
     )
 
-
 def task2(**context):
     records = context["ti"].xcom_pull(
         task_ids="task1",
@@ -64,58 +63,59 @@ def task2(**context):
     )
 
     hook = MySqlHook(mysql_conn_id="mysql")
+    processed_count = 0
+    failed_rows = []
 
-    for row in records:
-        country = row[0]  # Assume tuple structure: (country, value, indicator)
-        value = row[1]
-        indicator = row[2]
+    print("--- Starting data insertion process ---")
 
-        with hook.get_conn() as conn:
-            with conn.cursor() as cur:
+    with hook.get_conn() as conn:
+        with conn.cursor() as cur:
+            for i, row in enumerate(records):
                 try:
-                    # Get dw.dim_geo key for the country in this record (row)
-                    cur.execute(f"""
-                        SELECT geo_key
-                        FROM dw.dim_geo
-                        WHERE geo_name = %s;
-                    """, (country,)) # Use parameterized query
+                    # Assuming row structure is (country, value, indicator) based on task1 logic
+                    # Use raw values for maximum compatibility with the database driver's parameterized query handling
+                    country = row[0] 
+                    value = row[1] if row[1] else None
+                    indicator = row[2]
 
-                    dim_geo_keys = [row[0] for row in cur.fetchall()]
+                    # --- Dimension Lookups ---
+                    
+                    cur.execute("""
+                        SELECT geo_key FROM dw.dim_geo WHERE geo_name = %s;
+                    """, (country,))
+                    result = cur.fetchone()
+                    if not result: raise ValueError(f"No dimension geo record found for country: {country}")
+                    dim_geo_keys = [result[0]]
 
-                    # Get dw.dim_unit key for Litres
                     cur.execute("""
                         SELECT unit_key FROM dw.dim_unit WHERE unit_name = 'Litres';
                     """)
-                    dim_unit_keys = [row[0] for row in cur.fetchall()]
+                    result = cur.fetchone()
+                    if not result: raise ValueError("Could not find unit key for 'Litres'")
+                    dim_unit_keys = [result[0]]
 
-                    # Get dw.dim_indicator key for the indicator in this record (row)
-                    cur.execute(f"""
-                        SELECT indicator_key
-                        FROM dw.dim_indicator
-                        WHERE indicator_name = %s;
-                    """, (indicator,)) # Use parameterized query
+                    cur.execute("""
+                        SELECT indicator_key FROM dw.dim_indicator WHERE indicator_name = %s;
+                    """, (indicator,))
+                    result = cur.fetchone()
+                    if not result: raise ValueError(f"No dimension indicator record found for indicator: {indicator}")
+                    dim_indicator_keys = [result[0]]
 
-                    dim_indicator_keys = [row[0] for row in cur.fetchall()]
-
-                    # Get dw.dim_time key for current date
                     cur.execute("""
                         SELECT time_key FROM dw.dim_time WHERE year = year(CURRENT_DATE());
                     """)
-                    dim_time_keys = [row[0] for row in cur.fetchall()]
+                    result = cur.fetchone()
+                    if not result: raise ValueError("Could not find time key for current date")
+                    dim_time_keys = [result[0]]
 
-                    # Insert observation using the retrieved keys and values from the current row
+                    # --- UPSERT Insertion ---
                     insert_sql = """
                         INSERT INTO dw.fact_observation_country
-                            (
-                                geo_key, 
-                                indicator_key, 
-                                time_key,
-                                unit_key,
-                                value,
-                                loaded_at
-                            ) 
-                            VALUES 
-                            (%s, %s, %s, %s, %s, current_timestamp);
+                            (geo_key, indicator_key, time_key, unit_key, value, loaded_at) 
+                            VALUES (%s, %s, %s, %s, %s, current_timestamp)
+                        ON DUPLICATE KEY UPDATE 
+                            value = VALUES(value),
+                            loaded_at = VALUES(loaded_at);
                     """
 
                     cur.execute(insert_sql, (
@@ -123,12 +123,23 @@ def task2(**context):
                         dim_indicator_keys[0],
                         dim_time_keys[0],
                         dim_unit_keys[0],
-                        value,
+                        value, 
                     ))
+                    processed_count += 1
 
                 except Exception as e:
-                    # Handle cases where key lookups fail (e.g., data mismatch)
-                    print(f"Failed to process row ({country}, {value}, {indicator}): {e}")
+                    failed_rows.append((i, country, indicator, str(e)))
+                    print(f"[ERROR] Failed to process row {i}: {e}")
+
+
+    if failed_rows:
+        print("\n*** DATA INSERTION SUMMARY ***")
+        print(f"SUCCESSFULLY PROCESSED ROWS: {processed_count} out of {len(records)}")
+        print(f"FAILED TO PROCESS (SKIPPED/ERROR) ROWS: {len(failed_rows)}.")
+    else:
+        print("\n*** DATA INSERTION SUMMARY ***")
+        print(f"SUCCESSFULLY PROCESSED ALL {processed_count} ROWS into dw.fact_observation_country.")
+
 with DAG(
     dag_id='dw_f_country_drinks',
     default_args=default_args,
