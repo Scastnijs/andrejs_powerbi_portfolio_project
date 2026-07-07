@@ -72,7 +72,7 @@ def task2(**context):
         hook.run(insert_sql, parameters=row)
 
 with DAG(
-    dag_id='dw_drinks',
+    dag_id='dw_d_drinks',
     default_args=default_args,
     start_date=datetime(2026, 1, 20),
     schedule='0 0 * * *'

@@ -46,6 +46,8 @@ create table dw.dim_time
 	frequency varchar(10)
 );
 
+insert into dw.dim_time (year) values (year(CURRENT_DATE()));
+
 create table dw.dim_indicator
 (
 	indicator_key int auto_increment primary key,
@@ -85,6 +87,7 @@ create table dw.fact_observation_country
     loaded_at timestamp default current_timestamp,
     primary key (geo_key, indicator_key, time_key, unit_key)	
 );
+
 
 create table dw.dim_city
 (
