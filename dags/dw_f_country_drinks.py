@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from numbers import Number
 from airflow import DAG, task
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -59,10 +60,29 @@ def task1(**context):
 
 def task2(**context):
     """Processes all records from task1 and performs UPSERT into fact_observation_country."""
+
+    def sql_literal(value):
+        """Return a SQL literal for values used in the logged and executed UPSERT."""
+        if value is None:
+            return "NULL"
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, Number):
+            return str(value)
+
+        # Fallback for unexpected string-like values.
+        # The current fact value should be numeric, but this keeps the SQL valid if source data changes.
+        escaped_value = str(value).replace("\\", "\\\\").replace("'", "''")
+        return f"'{escaped_value}'"
+
     records = context["ti"].xcom_pull(
         task_ids="task1",
         key="customer_data"
     )
+
+    if not records:
+        print("No records received from task1. Nothing to process.")
+        return
 
     hook = MySqlHook(mysql_conn_id="mysql")
     processed_count = 0
@@ -71,87 +91,81 @@ def task2(**context):
     print("\n===============================================================")
     print("!!! DIAGNOSTIC OUTPUT: Generated SQL Statements to be run manually !!!")
     print("=============================================================\n")
-    
+
     with hook.get_conn() as conn:
         with conn.cursor() as cur:
-            for i, row in enumerate(records):
+            for i, row in enumerate(records, start=1):
+                country = None
+                indicator = None
+
                 try:
-                    country = row[0] 
-                    value = row[1] if row[1] else None
+                    country = row[0]
+                    value = row[1] if row[1] is not None else None
                     indicator = row[2]
 
-                    # --- Dimension Lookups (Same dimension lookups) ---
+                    # --- Dimension Lookups ---
                     cur.execute("""
                         SELECT geo_key FROM dw.dim_geo WHERE geo_name = %s;
                     """, (country,))
                     result = cur.fetchone()
-                    if not result: raise ValueError(f"No dimension geo record found for country: {country}")
-                    dim_geo_keys = [result[0]]
+                    if not result:
+                        raise ValueError(f"No dimension geo record found for country: {country}")
+                    geo_key = result[0]
 
                     cur.execute("""
                         SELECT unit_key FROM dw.dim_unit WHERE unit_name = 'Litres';
                     """)
                     result = cur.fetchone()
-                    if not result: raise ValueError("Could not find unit key for 'Litres'")
-                    dim_unit_keys = [result[0]]
+                    if not result:
+                        raise ValueError("Could not find unit key for 'Litres'")
+                    unit_key = result[0]
 
                     cur.execute("""
                         SELECT indicator_key FROM dw.dim_indicator WHERE indicator_name = %s;
                     """, (indicator,))
                     result = cur.fetchone()
-                    if not result: raise ValueError(f"No dimension indicator record found for indicator: {indicator}")
-                    dim_indicator_keys = [result[0]]
+                    if not result:
+                        raise ValueError(f"No dimension indicator record found for indicator: {indicator}")
+                    indicator_key = result[0]
 
                     cur.execute("""
                         SELECT time_key FROM dw.dim_time WHERE year = year(CURRENT_DATE());
                     """)
                     result = cur.fetchone()
-                    if not result: raise ValueError("Could not find time key for current date")
-                    dim_time_keys = [result[0]]
+                    if not result:
+                        raise ValueError("Could not find time key for current date")
+                    time_key = result[0]
 
-                    # --- Construct SQL Statement and Log it out ---
-                    
-                    insert_sql_template = """
-                        INSERT INTO dw.fact_observation_country
-                            (geo_key, indicator_key, time_key, unit_key, value, loaded_at) 
-                            VALUES (%s, %s, %s, %s, %s, current_timestamp)
-                        ON DUPLICATE KEY UPDATE 
-                            value = VALUES(value),
-                            loaded_at = VALUES(loaded_at);
-                    """
-
-                    # Manually format the executed values for logging readability.
-                    # Keep insert_sql_template parameterized for safe execution,
-                    # but log one complete SQL statement that can be copied and run manually.
-                    logged_value = "NULL" if value is None else str(value)
+                    # --- Build ONE final SQL statement and use it for both logging and execution ---
+                    upsert_sql = f"""
+INSERT INTO dw.fact_observation_country
+    (geo_key, indicator_key, time_key, unit_key, value, loaded_at)
+VALUES ({geo_key}, {indicator_key}, {time_key}, {unit_key}, {sql_literal(value)}, current_timestamp)
+ON DUPLICATE KEY UPDATE
+    value = VALUES(value),
+    loaded_at = VALUES(loaded_at);
+""".strip()
 
                     log_sql = f"""
-                    -- Log entry for Record {i + 1} (Country: {country}, Indicator: {indicator}) --
-                    INSERT INTO dw.fact_observation_country
-                        (geo_key, indicator_key, time_key, unit_key, value, loaded_at)
-                    VALUES ({dim_geo_keys[0]}, {dim_indicator_keys[0]}, {dim_time_keys[0]}, {dim_unit_keys[0]}, {logged_value}, current_timestamp)
-                    ON DUPLICATE KEY UPDATE
-                        value = VALUES(value),
-                        loaded_at = VALUES(loaded_at);
-                    -- End log entry --
-                    """
-                    # Print the fully formatted SQL to the console for the user
-                    print("\n" + log_sql.strip())
+-- Log entry for Record {i} (Country: {country}, Indicator: {indicator}) --
+{upsert_sql}
+-- End log entry --
+""".strip()
 
-                    # --- Execution (Keep this part running) ---
-                    cur.execute(insert_sql_template, (
-                        dim_geo_keys[0],
-                        dim_indicator_keys[0],
-                        dim_time_keys[0],
-                        dim_unit_keys[0],
-                        value if value is not None else None, # Passing None/NULL for SQL
-                    ))
+                    print("\n" + log_sql)
+
+                    # Execute exactly the same UPSERT SQL that was printed in the log.
+                    cur.execute(upsert_sql)
                     processed_count += 1
 
                 except Exception as e:
                     failed_rows.append((i, country, indicator, str(e)))
                     print(f"[ERROR] Failed to process row {i}: {e}")
 
+            # MySQL connections usually do not autocommit inside Airflow hooks.
+            # Explicit commit makes Python execution persist the same way as running the logged SQL manually.
+            conn.commit()
+            print(f"\nCommitted {processed_count} successful UPSERT statements to MySQL.")
 
     if failed_rows:
         print("\n\n*** DATA INSERTION SUMMARY ***")
