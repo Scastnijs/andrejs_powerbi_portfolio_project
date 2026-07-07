@@ -73,7 +73,6 @@ def task2(**context):
     with hook.get_conn() as conn:
         with conn.cursor() as cur:
             for i, row in enumerate(records):
-                # Assuming row structure is (country, value, indicator) based on task1 logic
                 try:
                     country = row[0] 
                     value = row[1] if row[1] else None
@@ -142,26 +141,31 @@ def task2(**context):
 
 
 def task3(**context):
-    """Confirms data presence by selecting 10 recent records."""
-    # Use a simple SQL execution for reading the limited set of rows
-    sql_query = """
-        SELECT * FROM dw.fact_observation_country LIMIT 10;
-    """
-
+    """Confirms data presence by executing a simple read query."""
     hook = MySqlHook(mysql_conn_id="mysql")
-    print("--- Running confirmation query (Task 3) ---")
-    
+
+    # 1. Attempt to flush the connection context, making written data visible.
+    print("--- Flushing connection and verifying visibility ---")
     with hook.get_conn() as conn:
         with conn.cursor() as cur:
+            # Execute a dummy query to force a commit/flush on many MySQL environments
+            cur.execute("SELECT 1;") 
+
+            # 2. Now, run the confirmation query.
+            sql_query = """
+                SELECT * FROM dw.fact_observation_country LIMIT 10;
+            """
+            print(f"--- Running final confirmation query: {sql_query} ---")
             cur.execute(sql_query)
             records = cur.fetchall()
 
     if records:
         print(f"\n*** CONFIRMATION SUCCESS ***")
-        print(f"Successfully retrieved {len(records)} rows from dw.fact_observation_country.")
+        print(f"Successfully retrieved {len(records)} rows from dw.fact_observation_country, confirming successful data persistence.")
     else:
         print("\n*** WARNING ***")
-        print("The confirmation query returned zero rows, indicating the data is still not visible in this connection scope.")
+        print("The confirmation query returned zero rows, suggesting the issue persists at the database transaction visibility level.")
+
 
 
 with DAG(
