@@ -56,7 +56,9 @@ def task1(**context):
         value=records
     )
 
+
 def task2(**context):
+    """Processes all records from task1 and performs UPSERT into fact_observation_country."""
     records = context["ti"].xcom_pull(
         task_ids="task1",
         key="customer_data"
@@ -71,15 +73,13 @@ def task2(**context):
     with hook.get_conn() as conn:
         with conn.cursor() as cur:
             for i, row in enumerate(records):
+                # Assuming row structure is (country, value, indicator) based on task1 logic
                 try:
-                    # Assuming row structure is (country, value, indicator) based on task1 logic
-                    # Use raw values for maximum compatibility with the database driver's parameterized query handling
                     country = row[0] 
                     value = row[1] if row[1] else None
                     indicator = row[2]
 
                     # --- Dimension Lookups ---
-                    
                     cur.execute("""
                         SELECT geo_key FROM dw.dim_geo WHERE geo_name = %s;
                     """, (country,))
@@ -140,6 +140,30 @@ def task2(**context):
         print("\n*** DATA INSERTION SUMMARY ***")
         print(f"SUCCESSFULLY PROCESSED ALL {processed_count} ROWS into dw.fact_observation_country.")
 
+
+def task3(**context):
+    """Confirms data presence by selecting 10 recent records."""
+    # Use a simple SQL execution for reading the limited set of rows
+    sql_query = """
+        SELECT * FROM dw.fact_observation_country LIMIT 10;
+    """
+
+    hook = MySqlHook(mysql_conn_id="mysql")
+    print("--- Running confirmation query (Task 3) ---")
+    
+    with hook.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_query)
+            records = cur.fetchall()
+
+    if records:
+        print(f"\n*** CONFIRMATION SUCCESS ***")
+        print(f"Successfully retrieved {len(records)} rows from dw.fact_observation_country.")
+    else:
+        print("\n*** WARNING ***")
+        print("The confirmation query returned zero rows, indicating the data is still not visible in this connection scope.")
+
+
 with DAG(
     dag_id='dw_f_country_drinks',
     default_args=default_args,
@@ -155,5 +179,11 @@ with DAG(
         task_id="task2",
         python_callable=task2,
     )
+    
+    # New confirmation task added here!
+    task3 = PythonOperator(
+        task_id="task3",
+        python_callable=task3,
+    )
 
-    task1 >> task2
+    task1 >> task2 >> task3
