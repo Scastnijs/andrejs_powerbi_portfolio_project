@@ -21,14 +21,14 @@ def task1(**context):
         select 
             COALESCE(ca.canonical_country, uh.country) AS country,
             value,
-            indicator,
+            indicator_code,
             unit_code,
             year
         from
             (select 
                 country,
                 rank as value,
-                'h_rank' as indicator,
+                'h_rank' as indicator_code,
                 'NR' as unit_code,
                 year
             from staging.happiness
@@ -36,7 +36,7 @@ def task1(**context):
             select 
                 country,
                 score as value,
-                'h_score' as indicator,
+                'h_score' as indicator_code,
                 'NR' as unit_code,
                 year
             from staging.happiness
@@ -44,7 +44,7 @@ def task1(**context):
             select 
                 country,
                 gdp_per_capita as value,
-                'gdp_pc' as indicator,
+                'gdp_pc' as indicator_code,
                 'NR' as unit_code,
                 year
             from staging.happiness
@@ -52,7 +52,7 @@ def task1(**context):
             select 
                 country,
                 family as value,
-                'family' as indicator,
+                'family' as indicator_code,
                 'NR' as unit_code,
                 year
             from staging.happiness
@@ -60,7 +60,7 @@ def task1(**context):
             select 
                 country,
                 health as value,
-                'health' as indicator,
+                'health' as indicator_code,
                 'NR' as unit_code,
                 year
             from staging.happiness
@@ -68,7 +68,7 @@ def task1(**context):
             select 
                 country,
                 freedom as value,
-                'freedom' as indicator,
+                'freedom' as indicator_code,
                 'NR' as unit_code,
                 year
             from staging.happiness
@@ -76,7 +76,7 @@ def task1(**context):
             select 
                 country,
                 trust as value,
-                'trust' as indicator,
+                'trust' as indicator_code,
                 'NR' as unit_code,
                 year
             from staging.happiness
@@ -84,7 +84,7 @@ def task1(**context):
             select 
                 country,
                 generosity as value,
-                'generosity' as indicator,
+                'generosity' as indicator_code,
                 'NR' as unit_code,
                 year
             from staging.happiness
@@ -92,7 +92,7 @@ def task1(**context):
             select 
                 country,
                 dystopia as value,
-                'dystopia' as indicator,
+                'dystopia' as indicator_code,
                 'NR' as unit_code,
                 year
             from staging.happiness
@@ -146,12 +146,12 @@ def task2(**context):
         with conn.cursor() as cur:
             for i, row in enumerate(records, start=1):
                 country = None
-                indicator = None
+                indicator_code = None
 
                 try:
                     country = row[0]
                     value = row[1] if row[1] is not None else None
-                    indicator = row[2]
+                    indicator_code = row[2]
                     unit_code = row[3]
                     year = row[4]
 
@@ -173,11 +173,11 @@ def task2(**context):
                     unit_key = result[0]
 
                     cur.execute("""
-                        SELECT indicator_key FROM dw.dim_indicator WHERE indicator_name = %s;
-                    """, (indicator,))
+                        SELECT indicator_key FROM dw.dim_indicator WHERE indicator_code = %s;
+                    """, (indicator_code,))
                     result = cur.fetchone()
                     if not result:
-                        raise ValueError(f"No dimension indicator record found for indicator: {indicator}")
+                        raise ValueError(f"No dimension indicator record found for indicator: {indicator_code}")
                     indicator_key = result[0]
 
                     cur.execute("""
@@ -203,7 +203,7 @@ ON DUPLICATE KEY UPDATE
                     processed_count += 1
 
                 except Exception as e:
-                    failed_rows.append((i, country, indicator, str(e)))
+                    failed_rows.append((i, country, indicator_code, str(e)))
                     print(f"[ERROR] Failed to process row {i}: {e}")
 
             # MySQL connections usually do not autocommit inside Airflow hooks.
