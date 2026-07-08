@@ -142,14 +142,6 @@ ON DUPLICATE KEY UPDATE
     loaded_at = VALUES(loaded_at);
 """.strip()
 
-                    log_sql = f"""
--- Log entry for Record {i} (Country: {country}, Indicator: {indicator}) --
-{upsert_sql}
--- End log entry --
-""".strip()
-
-                    print("\n" + log_sql)
-
                     # Execute exactly the same UPSERT SQL that was printed in the log.
                     cur.execute(upsert_sql)
                     processed_count += 1
