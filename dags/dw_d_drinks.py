@@ -1,9 +1,8 @@
 from datetime import datetime, timedelta
-from airflow import DAG, task
-from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
+
+from airflow import DAG
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.mysql.hooks.mysql import MySqlHook
-
 from airflow.providers.standard.operators.python import PythonOperator
 
 
@@ -13,26 +12,46 @@ default_args = {
     'retry_delay': timedelta(minutes=1)
 }
 
+
 def task1(**context):
     hook = PostgresHook(postgres_conn_id="postgres")
 
     records = hook.get_records("""
+        WITH drinks_normalized AS (
+            SELECT
+                COALESCE(ca.canonical_country, d.country) AS country,
+                d.continent,
+                d.id
+            FROM staging.drinks d
+            LEFT JOIN staging.country_alias ca
+                ON d.country = ca.alias_country
+            WHERE d.continent IS NOT NULL
+        ),
+        drinks_deduplicated AS (
+            SELECT
+                country,
+                continent,
+                ROW_NUMBER() OVER (
+                    PARTITION BY country
+                    ORDER BY id DESC
+                ) AS rn
+            FROM drinks_normalized
+        )
         SELECT
             c.iso2,
-            COALESCE(ca.canonical_country, d.country) AS country,
+            dd.country,
             c.iso2,
-            d.continent        
-        FROM staging.drinks d
-        LEFT JOIN staging.country_alias ca
-            ON d.country = ca.alias_country
-        left join staging.countries c
-            on COALESCE(ca.canonical_country, d.country) = c.name_short
-        where c.iso2 is not null
+            dd.continent
+        FROM drinks_deduplicated dd
+        LEFT JOIN staging.countries c
+            ON dd.country = c.name_short
+        WHERE dd.rn = 1
+          AND c.iso2 IS NOT NULL
     """)
 
     # Push data to XCom
     context["ti"].xcom_push(
-        key="customer_data",
+        key="drinks_data",
         value=records
     )
 
@@ -40,21 +59,37 @@ def task1(**context):
 def task2(**context):
     records = context["ti"].xcom_pull(
         task_ids="task1",
-        key="customer_data"
-    )
+        key="drinks_data"
+    ) or []
 
     hook = MySqlHook(mysql_conn_id="mysql")
 
+    exists_sql = """
+        SELECT 1
+        FROM dw.dim_geo
+        WHERE geo_code = %s
+        LIMIT 1
+    """
+
+    update_sql = """
+        UPDATE dw.dim_geo
+        SET
+            geo_name = %s,
+            iso2 = %s,
+            continent_code = %s
+        WHERE geo_code = %s
+    """
+
     insert_sql = """
-        INSERT INTO dw.dim_geo 
+        INSERT INTO dw.dim_geo
             (
-                geo_code, 
-                geo_name, 
+                geo_code,
+                geo_name,
                 geo_type,
                 iso2,
                 continent_code
-            ) 
-            VALUES 
+            )
+            VALUES
             (
                 %s,
                 %s,
@@ -62,14 +97,32 @@ def task2(**context):
                 %s,
                 %s
             )
-            ON DUPLICATE KEY UPDATE
-            geo_name = VALUES(geo_name),
-            iso2 = VALUES(iso2),
-            continent_code = VALUES(continent_code)
     """
 
-    for row in records:
-        hook.run(insert_sql, parameters=row)
+    conn = hook.get_conn()
+    cursor = conn.cursor()
+
+    try:
+        for geo_code, geo_name, iso2, continent_code in records:
+            cursor.execute(exists_sql, (geo_code,))
+            exists = cursor.fetchone()
+
+            if exists:
+                cursor.execute(
+                    update_sql,
+                    (geo_name, iso2, continent_code, geo_code)
+                )
+            else:
+                cursor.execute(
+                    insert_sql,
+                    (geo_code, geo_name, iso2, continent_code)
+                )
+
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
 
 with DAG(
     dag_id='dw_d_drinks',
