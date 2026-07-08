@@ -8,7 +8,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 
 default_args = {
     'owner': 'andrejs',
-    'retries': 5,
+    'retries': 2,
     'retry_delay': timedelta(minutes=1)
 }
 
