@@ -6,7 +6,7 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
 with DAG(
-    dag_id="country_alias",
+    dag_id="staging_country_alias",
     start_date=datetime(2025, 1, 1),
     schedule=None,
     catchup=False,
