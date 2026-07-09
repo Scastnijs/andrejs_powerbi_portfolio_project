@@ -79,6 +79,7 @@ FACT_DAGS = [
 POKE_INTERVAL_SECONDS = int(os.getenv("MASTER_DAG_POKE_INTERVAL_SECONDS", "30"))
 PARALLEL_DAG_RESTARTS = int(os.getenv("MASTER_DAG_PARALLEL_RESTARTS", "1"))
 SEQUENTIAL_SECTION_RESTARTS = int(os.getenv("MASTER_DAG_SEQUENTIAL_RESTARTS", "1"))
+SEQUENTIAL_DAG_RESTARTS = int(os.getenv("MASTER_DAG_SEQUENTIAL_RESTARTS", "1"))
 
 DEFAULT_ARGS = {
     "owner": "andrejs",
@@ -156,6 +157,39 @@ def _refresh_dag_run(dag_run: DagRun, session=None) -> DagRun:
         .one()
     )
 
+def _make_child_dag_task(
+    child_dag_id: str,
+    section_name: str,
+    retries: int,
+) -> PythonOperator:
+    """Create one Airflow task that triggers and waits for one child DAG."""
+    return PythonOperator(
+        task_id=f"run_{child_dag_id}",
+        python_callable=_run_child_dag,
+        op_kwargs={
+            "section_name": section_name,
+            "child_dag_id": child_dag_id,
+        },
+        retries=retries,
+        retry_delay=timedelta(minutes=1),
+    )
+
+def _run_child_dag(child_dag_id: str, section_name: str, **context) -> None:
+    """Run one child DAG from the master DAG.
+
+    This callable is used by every child-DAG task, both parallel and sequential.
+    Rerun behavior is controlled by the Airflow task retry count assigned when
+    the task is created.
+    """
+    parent_dag_run_id = context.get("run_id")
+    attempt = _task_attempt_from_context(context)
+
+    _trigger_and_wait_for_success(
+        child_dag_id=child_dag_id,
+        section_name=section_name,
+        attempt=attempt,
+        parent_dag_run_id=parent_dag_run_id,
+    )
 
 def _wait_for_child_dag(child_dag_run: DagRun) -> DagRunState:
     """Block until a child DAG reaches SUCCESS or FAILED."""
@@ -255,29 +289,23 @@ def _build_parallel_section(
     section_name: str,
     child_dag_ids: Iterable[str],
 ) -> TaskGroup:
-    """Create a TaskGroup where all child DAGs run in parallel."""
+    """Create a TaskGroup where all child DAG tasks run in parallel."""
     with TaskGroup(group_id=group_id, tooltip=tooltip) as section:
         section_start = EmptyOperator(task_id="start")
         section_end = EmptyOperator(task_id="end")
 
-        run_child_dag_tasks = [
-            PythonOperator(
-                task_id=f"run_{child_dag_id}",
-                python_callable=_run_parallel_child_dag,
-                op_kwargs={
-                    "section_name": section_name,
-                    "child_dag_id": child_dag_id,
-                },
+        child_dag_tasks = [
+            _make_child_dag_task(
+                child_dag_id=child_dag_id,
+                section_name=section_name,
                 retries=PARALLEL_DAG_RESTARTS,
-                retry_delay=timedelta(minutes=1),
             )
             for child_dag_id in child_dag_ids
         ]
 
-        section_start >> run_child_dag_tasks >> section_end
+        section_start >> child_dag_tasks >> section_end
 
     return section
-
 
 def _build_sequential_section(
     group_id: str,
@@ -285,24 +313,23 @@ def _build_sequential_section(
     section_name: str,
     child_dag_ids: Iterable[str],
 ) -> TaskGroup:
-    """Create a TaskGroup where child DAGs run sequentially inside one task."""
+    """Create a TaskGroup where every child DAG is its own sequential task."""
     with TaskGroup(group_id=group_id, tooltip=tooltip) as section:
         section_start = EmptyOperator(task_id="start")
-
-        run_section = PythonOperator(
-            task_id=f"run_{section_name}_dags_in_sequence",
-            python_callable=_run_sequential_section,
-            op_kwargs={
-                "section_name": section_name,
-                "child_dag_ids": list(child_dag_ids),
-            },
-            retries=SEQUENTIAL_SECTION_RESTARTS,
-            retry_delay=timedelta(minutes=1),
-        )
-
         section_end = EmptyOperator(task_id="end")
 
-        section_start >> run_section >> section_end
+        previous_task = section_start
+
+        for child_dag_id in child_dag_ids:
+            child_dag_task = _make_child_dag_task(
+                child_dag_id=child_dag_id,
+                section_name=section_name,
+                retries=SEQUENTIAL_DAG_RESTARTS,
+            )
+            previous_task >> child_dag_task
+            previous_task = child_dag_task
+
+        previous_task >> section_end
 
     return section
 
@@ -338,14 +365,14 @@ with DAG(
 
     dimension_section = _build_sequential_section(
         group_id="section_3_dimension_dags",
-        tooltip="Dimension DAGs run in dependency order.",
+        tooltip="Dimension DAGs run in dependency order, with one task per DAG.",
         section_name="dw_d",
         child_dag_ids=DIMENSION_DAGS,
     )
 
     fact_section = _build_sequential_section(
         group_id="section_4_fact_dags",
-        tooltip="Fact DAGs run after dimensions are loaded.",
+        tooltip="Fact DAGs run in dependency order, with one task per DAG.",
         section_name="dw_f",
         child_dag_ids=FACT_DAGS,
     )
