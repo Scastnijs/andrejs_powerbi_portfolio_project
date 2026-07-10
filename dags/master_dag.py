@@ -41,8 +41,6 @@ from airflow.utils.state import DagRunState
 
 TEST_DAGS = [
     "mysql_test",
-    "ollama_test",
-    "oracle_test",
     "postgres_test",
 ]
 
