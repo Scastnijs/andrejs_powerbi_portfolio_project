@@ -1,0 +1,72 @@
+Latest Car Density Year = 
+MAXX(
+    CALCULATETABLE(
+        'fact_observation_country',
+        REMOVEFILTERS('dim_time'),
+        FILTER(
+            ALL('dim_indicator'),
+            'dim_indicator'[indicator_name] = "car_density"
+        )
+    ),
+    RELATED('dim_time'[year])
+)
+
+
+Latest Car Density = 
+VAR LatestYear =
+    [Latest Car Density Year]
+RETURN
+    IF(
+        ISBLANK(LatestYear),
+        BLANK(),
+        CALCULATE(
+            MAX('fact_observation_country'[value]),
+            REMOVEFILTERS('dim_time'),
+            FILTER(
+                ALL('dim_indicator'),
+                'dim_indicator'[indicator_name] = "car_density"
+            ),
+            'dim_time'[year] = LatestYear
+        )
+    )
+
+Latest Happiness Score = 
+VAR LatestYear =
+    [Latest Happiness Year]
+RETURN
+    IF(
+        ISBLANK(LatestYear),
+        BLANK(),
+        CALCULATE(
+            MAX('fact_observation_country'[value]),
+            REMOVEFILTERS('dim_time'),
+            FILTER(
+                ALL('dim_indicator'),
+                'dim_indicator'[indicator_name] = "happiness_score"
+            ),
+            'dim_time'[year] = LatestYear
+        )
+    )
+
+Latest Happiness Year = 
+MAXX(
+    CALCULATETABLE(
+        'fact_observation_country',
+        REMOVEFILTERS('dim_time'),
+        FILTER(
+            ALL('dim_indicator'),
+            'dim_indicator'[indicator_name] = "happiness_score"
+        )
+    ),
+    RELATED('dim_time'[year])
+)
+
+Indicator Emoji = 
+SWITCH(
+    'dim_indicator'[indicator_name],
+    "beer",   "🍺",
+    "spirit", "🍸",
+    "wine",   "🍷",
+    'dim_indicator'[indicator_name]
+)
+

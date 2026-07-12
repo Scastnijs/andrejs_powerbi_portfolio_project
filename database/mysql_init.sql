@@ -117,4 +117,78 @@ create table dw.fact_observation_city
     primary key (geo_key, city_key, indicator_key, time_key, unit_key)	
 );
 
+CREATE OR REPLACE VIEW dw.v_country_alcohol_summary AS
+SELECT
+	geo_key,
+    geo_code,
+    alcohol_type,
+    litres
+FROM (
+	SELECT
+	b.geo_name,
+	b.geo_code,
+	b.geo_key,
+	(
+	 case when (b.beer > s.spirit) and (b.beer > w.wine) then 'beer'
+			when (s.spirit > b.beer) and (s.spirit> w.wine) then 'spirit'
+			else 'wine'
+	 end
+	) alcohol_type,
+	(
+	 case when (b.beer > s.spirit) and (b.beer > w.wine) then b.beer
+			when (s.spirit > b.beer) and (s.spirit> w.wine) then s.spirit
+			else w.wine
+	 end
+	) litres
+	FROM
+	(			
+	select  
+				dg.geo_name,
+				dg.geo_code,
+				dg.geo_key,
+				fc.value as beer
+			from dw.fact_observation_country fc
+			left join dw.dim_geo dg 
+				on fc.geo_key = dg.geo_key 
+			left join dw.dim_indicator di  
+				on fc.indicator_key = di.indicator_key
+			left join dw.dim_time dt 
+				on fc.time_key = dt.time_key
+			where 
+				dg.continent_code = 'EU'
+				and di.indicator_name = 'beer') b
+	LEFT JOIN
+	(			
+	select  
+				dg.geo_name,
+				fc.value as spirit
+			from dw.fact_observation_country fc
+			left join dw.dim_geo dg 
+				on fc.geo_key = dg.geo_key 
+			left join dw.dim_indicator di  
+				on fc.indicator_key = di.indicator_key
+			left join dw.dim_time dt 
+				on fc.time_key = dt.time_key
+			where 
+				dg.continent_code = 'EU'
+				and di.indicator_name = 'spirit') s
+	ON b.geo_name = s.geo_name 
+	LEFT JOIN
+	(			
+	select  
+				dg.geo_name,
+				fc.value as wine
+			from dw.fact_observation_country fc
+			left join dw.dim_geo dg 
+				on fc.geo_key = dg.geo_key 
+			left join dw.dim_indicator di  
+				on fc.indicator_key = di.indicator_key
+			left join dw.dim_time dt 
+				on fc.time_key = dt.time_key
+			where 
+				dg.continent_code = 'EU'
+				and di.indicator_name = 'wine') w
+	ON b.geo_name = w.geo_name 
+) alcohol_summary;
+
 SET autocommit = 0;
