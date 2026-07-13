@@ -15,10 +15,10 @@ Setup
 1. git clone repository
 2. docker compose up -d
 3. (*) install MySQL connector - /plugins/mysql-connector-net-8.0.28.msi
-4.1. (*) create Python virtual environment
+- 4.1. create Python virtual environment
 	python3 -m venv pbi_venv
 	pbi_venv\Scripts\activate
-4.2. (*) pip install -r powerbi/python_requirements.txt
+- 4.2.  pip install -r powerbi/python_requirements.txt
 5. (*) configure Power BI Python executable 
 6. Run manually master_dag (dags/master_dag.py)
 7. open dashboard.pbix
