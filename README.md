@@ -4,7 +4,7 @@
 
 - Docker Desktop
 - Power BI Desktop
-*- Python 3.12 (just for Python Visuals in Power BI, currently not used)
+- Python 3.12 (just for Python Visuals in Power BI, currently not used)
 
 Architecture Diagram (where to start)
 
