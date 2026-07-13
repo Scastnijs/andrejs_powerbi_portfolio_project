@@ -27,9 +27,9 @@ Setup
 
 Fuzzy Match (AI agent to catch country aliases)
 
-Currently requires local Ollama installation
+- Currently requires local Ollama installation
 /dags/dw_country_alias.py
-gemma4:latest model used, size 3.5 GB
+- gemma4:latest model used, size 3.5 GB
 http://localhost:11434
 /data/country_alias.csv 
 /ollama/logs_..
