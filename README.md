@@ -14,9 +14,9 @@ Setup
 
 1. git clone repository
 2. docker compose up -d
-(*) docker compose -f "docker-compose.yaml" up airflow-init
-(*) docker compose -f "docker-compose.yaml" up -d
-4. (*) install MySQL connector - /plugins/mysql-connector-net-8.0.28.msi
+2.1. (*) docker compose -f "docker-compose.yaml" up airflow-init
+2.2. (*) docker compose -f "docker-compose.yaml" up -d
+3. (*) install MySQL connector - /plugins/mysql-connector-net-8.0.28.msi
 - 4.1. create Python virtual environment
 	python3 -m venv pbi_venv
 	pbi_venv\Scripts\activate
