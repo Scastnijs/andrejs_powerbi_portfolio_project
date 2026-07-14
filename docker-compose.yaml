@@ -124,8 +124,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ${AIRFLOW_PROJ_DIR:-.}/files:/files
-      # Uncomment to run SQL files only when a new MySQL volume is initialized:
-      # - ${AIRFLOW_PROJ_DIR:-.}/database/mysql:/docker-entrypoint-initdb.d:ro
+      - ${AIRFLOW_PROJ_DIR:-.}/database/mysql_init.sql:/docker-entrypoint-initdb.d/001_mysql_init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 10s
