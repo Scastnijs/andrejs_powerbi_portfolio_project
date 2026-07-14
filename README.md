@@ -14,15 +14,18 @@ Setup
 
 1. git clone repository
 2. docker compose up -d
-3. (*) install MySQL connector - /plugins/mysql-connector-net-8.0.28.msi
+	(*) docker compose -f "docker-compose.yaml" up airflow-init
+	(*) docker compose -f "docker-compose.yaml" up -d
+4. (*) install MySQL connector - /plugins/mysql-connector-net-8.0.28.msi
 - 4.1. create Python virtual environment
 	python3 -m venv pbi_venv
 	pbi_venv\Scripts\activate
 - 4.2.  pip install -r powerbi/python_requirements.txt
-5. (*) configure Power BI Python executable 
-6. Run manually master_dag (dags/master_dag.py)
-7. open dashboard.pbix
-8. click Refresh
+5. (*) configure Power BI Python executable
+6. Enable (turn on) dags (mentioned in master_dag)
+7. Run manually master_dag (dags/master_dag.py)
+8. open dashboard.pbix
+9. click Refresh
 - optional steps depends on environment
 
 Fuzzy Match (AI agent to catch country aliases)
@@ -51,6 +54,11 @@ Results
 - PostgreSQL and MySQL store transformed data
 - Power BI refreshes semantic model
 - Python visuals regenerate automatically
+
+Size/time
+
+- master_dag execution time 15-20 min
+- docker container size 3.5-5.0 GB
 
 Future improvements
 
