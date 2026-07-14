@@ -80,12 +80,15 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
+    - ${AIRFLOW_PROJ_DIR:-.}/files:/opt/airflow/files
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
     redis:
       condition: service_healthy
     postgres:
+      condition: service_healthy
+    mysql:
       condition: service_healthy
 
 services:
@@ -106,6 +109,30 @@ services:
       retries: 5
       start_period: 5s
     restart: always
+
+  mysql:
+    image: mysql:9.7
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-analytics}
+      MYSQL_USER: ${MYSQL_USER:-airflow}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-airflow}
+    command: --secure-file-priv=""
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ${AIRFLOW_PROJ_DIR:-.}/files:/files
+      # Uncomment to run SQL files only when a new MySQL volume is initialized:
+      # - ${AIRFLOW_PROJ_DIR:-.}/database/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
 
   redis:
     # Redis is limited to 7.2-bookworm due to licencing change
@@ -345,3 +372,4 @@ services:
 
 volumes:
   postgres-db-volume:
+  mysql_data:
