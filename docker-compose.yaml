@@ -80,7 +80,6 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
-    - ${AIRFLOW_PROJ_DIR:-.}/files:/opt/airflow/files
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -123,7 +122,6 @@ services:
     command: --secure-file-priv=""
     volumes:
       - mysql_data:/var/lib/mysql
-      - ${AIRFLOW_PROJ_DIR:-.}/files:/files
       - ${AIRFLOW_PROJ_DIR:-.}/database/mysql_init.sql:/docker-entrypoint-initdb.d/001_mysql_init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
