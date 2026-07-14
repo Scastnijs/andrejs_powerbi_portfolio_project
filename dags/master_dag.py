@@ -6,15 +6,16 @@ Execution flow:
 2. Staging DAGs run in parallel.
    - If one child DAG fails, only that failed child DAG task is retried.
 3. Dimension DAGs run in sequence.
-   - If one child DAG fails, the whole dimension section task is retried
-     from the first dimension DAG.
+   - Every child DAG is visible as its own task.
+   - If one child DAG fails, only that child DAG task is retried.
 4. Fact DAGs run in sequence.
-   - If one child DAG fails, the whole fact section task is retried
-     from the first fact DAG.
+   - Every child DAG is visible as its own task.
+   - If one child DAG fails, only that child DAG task is retried.
 
-The TaskGroup layout follows the section style from example_task_group.py,
-while the trigger/wait/rerun behavior keeps the orchestration logic from the
-original master_dag.py.
+Airflow 3 note:
+This DAG intentionally uses TriggerDagRunOperator instead of custom Python code
+that calls trigger_dag(), provide_session, or session.query(DagRun). Direct ORM
+metadata database access from task runtime code is not allowed in Airflow 3.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from datetime import timedelta
 import pendulum
 
 from airflow.providers.standard.operators.empty import EmptyOperator
-from airflow.providers.standard.operators.python import PythonOperator
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import DAG, TaskGroup
 from airflow.utils.state import DagRunState
 
@@ -72,7 +73,6 @@ FACT_DAGS = [
 
 POKE_INTERVAL_SECONDS = int(os.getenv("MASTER_DAG_POKE_INTERVAL_SECONDS", "30"))
 PARALLEL_DAG_RESTARTS = int(os.getenv("MASTER_DAG_PARALLEL_RESTARTS", "1"))
-SEQUENTIAL_SECTION_RESTARTS = int(os.getenv("MASTER_DAG_SEQUENTIAL_RESTARTS", "1"))
 SEQUENTIAL_DAG_RESTARTS = int(os.getenv("MASTER_DAG_SEQUENTIAL_RESTARTS", "1"))
 
 DEFAULT_ARGS = {
@@ -81,60 +81,50 @@ DEFAULT_ARGS = {
     "retry_delay": timedelta(minutes=1),
 }
 
-TERMINAL_STATES = {
-    DagRunState.SUCCESS,
-    DagRunState.FAILED,
-}
-
 
 # -----------------------------------------------------------------------------
-# Child DAG trigger/wait helpers
+# Child DAG task factory
 # -----------------------------------------------------------------------------
 
-
-def _current_utc_run_stamp() -> str:
-    """Return a compact UTC timestamp suitable for unique child DAG run IDs."""
-    return pendulum.now("UTC").format("YYYYMMDDTHHmmssSSSSSS")
-
-
-def _build_child_run_id(section_name: str, child_dag_id: str, attempt: int) -> str:
-    return (
-        f"master__{section_name}__{child_dag_id}__"
-        f"attempt_{attempt}__{_current_utc_run_stamp()}"
-    )
-
-
-def _task_attempt_from_context(context: dict) -> int:
-    task_instance = context.get("ti")
-    if not task_instance:
-        return 1
-    return int(getattr(task_instance, "try_number", 1))
 
 def _make_child_dag_task(
     child_dag_id: str,
     section_name: str,
     retries: int,
-) -> PythonOperator:
-    """Create one Airflow task that triggers and waits for one child DAG."""
+) -> TriggerDagRunOperator:
+    """Create one Airflow task that triggers and waits for one child DAG.
+
+    The trigger_run_id includes the parent DAG timestamp and task try number.
+    This makes retry runs unique, so a failed child DAG can be triggered again
+    by the retried master task without colliding with the previous child run_id.
+    """
     return TriggerDagRunOperator(
-    task_id=f"run_{child_dag_id}",
-    trigger_dag_id=child_dag_id,
-    trigger_run_id=f"master__{section_name}__{child_dag_id}__{{{{ ts_nodash }}}}",
-    conf={
-        "triggered_by": "master_dag",
-        "master_section": section_name,
-    },
-    wait_for_completion=True,
-    poke_interval=POKE_INTERVAL_SECONDS,
-    allowed_states=[DagRunState.SUCCESS],
-    failed_states=[DagRunState.FAILED],
-    retries=retries,
-    retry_delay=timedelta(minutes=1),
-)
+        task_id=f"run_{child_dag_id}",
+        trigger_dag_id=child_dag_id,
+        trigger_run_id=(
+            f"master__{section_name}__{child_dag_id}__"
+            "{{ ts_nodash }}__try_{{ ti.try_number }}"
+        ),
+        conf={
+            "triggered_by": "master_dag",
+            "master_section": section_name,
+            "master_run_id": "{{ run_id }}",
+            "master_task_id": "{{ task.task_id }}",
+            "master_try_number": "{{ ti.try_number }}",
+        },
+        wait_for_completion=True,
+        poke_interval=POKE_INTERVAL_SECONDS,
+        allowed_states=[DagRunState.SUCCESS],
+        failed_states=[DagRunState.FAILED],
+        retries=retries,
+        retry_delay=timedelta(minutes=1),
+    )
+
 
 # -----------------------------------------------------------------------------
 # TaskGroup builders
 # -----------------------------------------------------------------------------
+
 
 def _build_parallel_section(
     group_id: str,
@@ -159,6 +149,7 @@ def _build_parallel_section(
         section_start >> child_dag_tasks >> section_end
 
     return section
+
 
 def _build_sequential_section(
     group_id: str,
